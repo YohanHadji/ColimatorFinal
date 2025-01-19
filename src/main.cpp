@@ -24,9 +24,6 @@
 movingAvg s1avg(20);
 movingAvg s2avg(20);
 
-movingAvg s1avg(20);
-movingAvg s2avg(20);
-
 AccelStepper stepperX(1, X_STEP_PIN, X_DIR_PIN);
 void handlePacket(uint8_t, uint8_t*, uint32_t);
 
@@ -245,9 +242,7 @@ void handleRpi(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
       Serial.println("Received packet from Raspberry");
       if (lastCmd.position >= 0 && lastCmd.position <= limite_safe) {
         stepperX.moveTo(-lastCmd.position);
-        while (stepperX.distanceToGo() != 0) {
-          stepperX.run();
-        }
+        servo3.writeMicroseconds(map(lastCmd.position,0,limite_safe,1000,2000));
         // Serial.println("Movimiento completado a posición: " + String(lastCmd.position));
       } else {
         Serial.println("Error: Posición fuera de límites");
