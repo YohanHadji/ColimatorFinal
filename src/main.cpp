@@ -1,10 +1,14 @@
 #include <Arduino.h>
-#include <PWMServo.h>
+// #include <PWMServo.h>
+#include <Servo.h>
 #include <capsule.h>
 #include <NativeEthernet.h>
 #include <NativeEthernetUdp.h>
 #include <AccelStepper.h>
 #include <capsule.h>
+#include <movingAvg.h>
+
+#define CALIBRATION_MODE false
 
 #define CAPSULE_ID_POSITION 0x15
 #define CAPSULE_ID_GUSTAVO_CUSTOM 0x21
@@ -12,6 +16,9 @@
 #define X_STEP_PIN 12
 #define X_DIR_PIN 11
 #define HOME_SWITCH_X 7
+
+movingAvg s1avg(20);
+movingAvg s2avg(20);
 
 AccelStepper stepperX(1, X_STEP_PIN, X_DIR_PIN);
 void handlePacket(uint8_t, uint8_t*, uint32_t);
@@ -28,8 +35,8 @@ EthernetUDP udp;
 EthernetServer server(80);
 
 // Define the servo pins
-const int servoPin1 = 3;
-const int servoPin2 = 4;
+const int servoPin1 = 4;
+const int servoPin2 = 3;
 
 #define SERVO_POWER_PIN 5
 #define SERVO_POWER_TIMER 5000
@@ -63,23 +70,27 @@ dataStruct lastCmd;
 CameraErrorPacket lastCameraError;
 
 // Create servo objects
-PWMServo servo1;
-PWMServo servo2;
+Servo servo1;
+Servo servo2;
 
 float servo1GlobalPos = 1500;
 float servo2GlobalPos = 1500;
 
-#define START_X 1125
-#define END_X 1650
-#define START_Y 1100
-#define END_Y 2000
+#define START_X 1000
+#define END_X 1550
+#define START_Y 1200
+#define END_Y 1800
 
-#define STEP_N 40
+#define STEP_N 4
 
 void setup() {
   // Attach servos to their respective pins
   servo1.attach(servoPin1, 1000, 2000);
   servo2.attach(servoPin2, 1000, 2000);
+
+  s1avg.begin();
+  s2avg.begin();
+
   Serial.begin(115200);
   Serial4.begin(115200);
 
@@ -97,47 +108,67 @@ void setup() {
   stepperX.setMaxSpeed(10000);
   stepperX.setAcceleration(1000);
 
-  // delay(5000);
+  servo1.write(90);
+  servo2.write(90);
 
-  // // Do a full scan with the servos with 100 steps on each axis from 900 to 2100us to calibrate the camera
-  // for (int i = 0; i < STEP_N/2; i++) {
+  if (CALIBRATION_MODE) {
+     delay(10000);
 
-  //   servo1GlobalPos = map(i*2, 0, STEP_N, START_X, END_X);
-  //   servo1.write(map(servo1GlobalPos, 1000, 2000, 0, 180));
-  //   delay(500);
-  //   // servo2.write(map(START_Y, 1000, 2000, 0, 180));
-  //   // delay(1000);
+    // Do a full scan with the servos with 100 steps on each axis from 900 to 2100us to calibrate the camera
+    for (int i = 0; i <= (STEP_N/2); i++) {
 
-  //   for (int j = 0; j < STEP_N; j++) {
-  //     servo2GlobalPos = map(j, 0, STEP_N, START_Y, END_Y);
-  //     servo2.write(map(servo2GlobalPos, 1000, 2000, 0, 180));
+      servo1GlobalPos = map(i*2, 0, STEP_N, START_X, END_X);
+      servo1.write(map(servo1GlobalPos, 1000, 2000, 0, 180));
 
-  //     delay(500);
+      delay(1000);
 
-  //     Serial.print(servo1GlobalPos);
-  //     Serial.print(",");
-  //     Serial.println(servo2GlobalPos);
-  //   }
+      Serial.print(servo1GlobalPos);
+      Serial.print(",");
+      Serial.println(servo2GlobalPos);
 
-  //   servo1GlobalPos = map((i*2)+1, 0, STEP_N, START_X, END_X);
-  //   servo1.write(map(servo1GlobalPos, 1000, 2000, 0, 180));
-  //   delay(500);
-  //   // servo2.write(map(END_Y, 1000, 2000, 0, 180));
-  //   // delay(1000);
+      delay(1000);
 
-  //   for (int j = STEP_N; j > 0; j--) {
-  //     servo2GlobalPos = map(j, 0, STEP_N, START_Y, END_Y);
-  //     servo2.write(map(servo2GlobalPos, 1000, 2000, 0, 180));
+      for (int j = 0; j <= STEP_N; j++) {
+        servo2GlobalPos = map(j, 0, STEP_N, START_Y, END_Y);
+        servo2.write(map(servo2GlobalPos, 1000, 2000, 0, 180));
 
-  //     delay(500);
+        delay(1000);
 
-  //     Serial.print(servo1GlobalPos);
-  //     Serial.print(",");
-  //     Serial.println(servo2GlobalPos);
-  //   }
-  // }
+        Serial.print(servo1GlobalPos);
+        Serial.print(",");
+        Serial.println(servo2GlobalPos);
 
-  homing();
+        delay(1000);
+
+      }
+
+      servo1GlobalPos = map((i*2)+1, 0, STEP_N, START_X, END_X);
+      servo1.write(map(servo1GlobalPos, 1000, 2000, 0, 180));
+
+      delay(1000);
+
+      Serial.print(servo1GlobalPos);
+      Serial.print(",");
+      Serial.println(servo2GlobalPos);
+
+      delay(1000);
+
+      for (int j = STEP_N; j >= 0; j--) {
+        servo2GlobalPos = map(j, 0, STEP_N, START_Y, END_Y);
+        servo2.write(map(servo2GlobalPos, 1000, 2000, 0, 180));
+
+        delay(1000);
+
+        Serial.print(servo1GlobalPos);
+        Serial.print(",");
+        Serial.println(servo2GlobalPos);
+
+        delay(1000);
+
+      }
+    }
+  }
+  // homing();   // comentar homing 
 }
 
 void loop() {
@@ -153,14 +184,14 @@ void loop() {
     rpi.decode(Serial.read());
   }
 
-  static unsigned long lastDataSent = millis();
+  // static unsigned long lastDataSent = millis();
 
-  if (millis()-lastDataSent>100) {
-      lastDataSent = millis();
-      Serial.print(servo1GlobalPos);
-      Serial.print(",");
-      Serial.println(servo2GlobalPos);
-  }
+  // if (millis()-lastDataSent>100) {
+  //     lastDataSent = millis();
+  //     Serial.print(servo1GlobalPos);
+  //     Serial.print(",");
+  //     Serial.println(servo2GlobalPos);
+  // }
 }
 
 void handleRpi(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
@@ -180,13 +211,13 @@ void handleRpi(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
         // servo1GlobalPos = map(lastCameraError.Cy, -1000, 1000, 1000, 2000);
         // servo2GlobalPos = map(lastCameraError.Cx, -1000, 1000, 1000, 2000);
 
-        servo1GlobalPos = lastCameraError.Cx;
-        servo2GlobalPos = lastCameraError.Cy;
+        servo1GlobalPos = s1avg.reading(lastCameraError.Cx*100)/100.0;
+        servo2GlobalPos = s2avg.reading(lastCameraError.Cy*100)/100.0;
 
         // map_quadrilateral_to_rectangle(lastCameraError.Cx, lastCameraError.Cy, servoPosX, servoPosY);
 
-        servo1.write(map(servo1GlobalPos, 1000, 2000, 0, 180));
-        servo2.write(map(servo2GlobalPos, 1000, 2000, 0, 180));
+        servo1.writeMicroseconds(int(servo1GlobalPos));
+        servo2.writeMicroseconds(int(servo2GlobalPos));
       }
     break;
 
@@ -194,7 +225,7 @@ void handleRpi(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
       memcpy(&lastCmd, dataIn, sizeof(dataStruct));
       Serial.println("Received packet from Raspberry");
       if (lastCmd.position >= 0 && lastCmd.position <= limite_safe) {
-        stepperX.moveTo(lastCmd.position);
+        stepperX.moveTo(-lastCmd.position);
         while (stepperX.distanceToGo() != 0) {
           stepperX.run();
         }
@@ -259,7 +290,7 @@ void homing() {
   while (digitalRead(HOME_SWITCH_X) == HIGH) {
     Serial.println("Homing...");
     // stepperX.moveTo(stepperX.currentPosition() - 10);
-    stepperX.setSpeed(-10000);
+    stepperX.setSpeed(10000);
     stepperX.runSpeed();
     delay(1);
   }
