@@ -37,6 +37,7 @@ EthernetServer server(80);
 // Define the servo pins
 const int servoPin1 = 4;
 const int servoPin2 = 3;
+const int servoPin3 = 6;
 
 #define SERVO_POWER_PIN 5
 #define SERVO_POWER_TIMER 5000
@@ -72,9 +73,11 @@ CameraErrorPacket lastCameraError;
 // Create servo objects
 Servo servo1;
 Servo servo2;
+Servo servo3;
 
 float servo1GlobalPos = 1500;
 float servo2GlobalPos = 1500;
+float servo3GlobalPos = 1500; // Nueva posición global para el servo3
 
 #define START_X 1000
 #define END_X 1550
@@ -87,7 +90,8 @@ void setup() {
   // Attach servos to their respective pins
   servo1.attach(servoPin1, 1000, 2000);
   servo2.attach(servoPin2, 1000, 2000);
-
+  servo3.attach(servoPin3, 1000, 2000);  // colimador ajuste 
+ 
   s1avg.begin();
   s2avg.begin();
 
@@ -110,6 +114,10 @@ void setup() {
 
   servo1.write(90);
   servo2.write(90);
+
+  #define SERVO_FOCUS_HOME_POSITION 90
+
+  servo3.write(SERVO_FOCUS_HOME_POSITION); // Inicializar el servo3 at home position
 
   if (CALIBRATION_MODE) {
      delay(10000);
@@ -168,7 +176,7 @@ void setup() {
       }
     }
   }
-  // homing();   // comentar homing 
+   homing();   // comentar homing 
 }
 
 void loop() {
@@ -183,6 +191,8 @@ void loop() {
   while (Serial.available() > 0) {
     rpi.decode(Serial.read());
   }
+
+  stepperX.run();
 
   // static unsigned long lastDataSent = millis();
 
@@ -225,13 +235,19 @@ void handleRpi(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
       memcpy(&lastCmd, dataIn, sizeof(dataStruct));
       Serial.println("Received packet from Raspberry");
       if (lastCmd.position >= 0 && lastCmd.position <= limite_safe) {
+
+        // Sincronización de servo3 con stepperX
+        float servo3Pos = map(lastCmd.position, 0, limite_safe, 1000, 2000);
+        servo3.writeMicroseconds((int)servo3Pos);
+
         stepperX.moveTo(-lastCmd.position);
-        while (stepperX.distanceToGo() != 0) {
-          stepperX.run();
-        }
-        // Serial.println("Movimiento completado a posición: " + String(lastCmd.position));
+        // while (stepperX.distanceToGo() != 0) {
+        //   stepperX.run();
+        // }
+
+        Serial.println("Movimiento completado a posición: " + String(lastCmd.position));
       } else {
-        // Serial.println("Error: Posición fuera de límites");
+        Serial.println("Error: Posición fuera de límites");
       }
     break;
   }
@@ -264,32 +280,9 @@ void handleJoystick(uint8_t packetId, uint8_t *dataIn, uint32_t len) {
   }
 }
 
-// // Define coefficients for the plane equations
-// float s1p00 = 1783;
-// float s1p10 = -0.1597;
-// float s1p01 = 4.126;
-
-// float s2p00 = 1757;
-// float s2p10 = 4.977;
-// float s2p01 = 0.2432;
-
-// float k1 = ((1498.0-1342.0)/-300.0);
-// float k2 = ((1668.0-1495.0)/-200.0);
-
-// // Define functions to calculate S1 and S2 based on CamX and CamY
-// float modelS1(float CamY) {
-//     return CENTER_X + k1*CamY;
-// }
-
-// float modelS2(float CamX) {
-//     return CENTER_Y + k2*CamX;
-// }
-
 void homing() {
   Serial.println("Starting homing");
   while (digitalRead(HOME_SWITCH_X) == HIGH) {
-    Serial.println("Homing...");
-    // stepperX.moveTo(stepperX.currentPosition() - 10);
     stepperX.setSpeed(10000);
     stepperX.runSpeed();
     delay(1);
